@@ -74,23 +74,24 @@ def generate_short_link(affiliate_link):
     response = requests.post(url, headers=headers, json=payload)
     return response.json()['link']
 
+
 def print_product_info_in_md(robot_id):
     res = get_robot_tasks(robot_id)
-    markdown_output = "| Position | Discount Rate | Product Name | Short Link |\n| --- | --- | --- | --- |\n"
+    markdown_output = "| Position | Discount Rate | Product Name | Short Link | Description |\n| --- | --- | --- | --- | --- |\n"
     csv_output = []
 
     for task in res["result"]['robotTasks']['items']:
         if 'capturedLists' in task and 'amazon product list parser' in task['capturedLists']:
-            count = 1
             for item in task['capturedLists']['amazon product list parser']:
                 affiliate_link = generate_affiliate_link(item['product link'], 'schentop5amaz-20')
                 short_link = generate_short_link(affiliate_link)
-                discount_rate = item['discount rate']
-                # Generate and save the description
-                generate_description(count, discount_rate, item['product name'], short_link)
-                count += 1
-                markdown_output += f"| {item['Position']} | {item['discount rate']} | {item['product name']} | {short_link} |\n"
-                csv_output.append([item['Position'], item['discount rate'], item['product name'], short_link])
+
+                # Generate description for each product
+                description = f"The product, {item['product name']}, is available for purchase at this link: {short_link}"
+
+                markdown_output += f"| {item['Position']} | {item['discount rate']} | {item['product name']} | {short_link} | {description} |\n"
+                csv_output.append(
+                    [item['Position'], item['discount rate'], item['product name'], short_link, description])
 
     timestamp = time.strftime("%Y%m%d-%H%M")
     markdown_filename = f"deal-{timestamp}"
@@ -103,22 +104,6 @@ def print_product_info_in_md(robot_id):
         writer.writerows(csv_output)
 
     return markdown_filename  # Return the filename without extension
-def generate_description(position, discount_rate,product_name, short_link):
-    # Generate description
-    description = f"{position} {discount_rate} {product_name}, Link: {short_link}"
-
-    # Generate timestamp
-    timestamp = time.strftime("%Y%m%d-%H%M")
-
-    # Create a directory for descriptions if it does not exist
-    os.makedirs('./product_description', exist_ok=True)
-
-    # Save the description in a text file named with product-timestamp
-    with open(f'./product_description/{product_name}-{timestamp}.txt', 'w') as file:
-        file.write(description)
-
-    # Print the description
-    print(description)
 def add_space_around_pipe(filename):
     with open(filename, "r") as f:
         content = f.read()

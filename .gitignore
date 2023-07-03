@@ -2,7 +2,12 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+*.md
+*.csv
+result/*
+markdown_output/*
+csv_output/*
+sct_output/*
 # C extensions
 *.so
 
