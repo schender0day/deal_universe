@@ -2,12 +2,26 @@ import http.client
 import requests
 import json
 import logging
-
+import csv
 import os
 import requests
 from datetime import datetime
 logging.basicConfig(level=logging.INFO)
+import openai
+import pandas as pd
 
+# Define the path of your API key file
+file_path = "chat.txt"
+
+# Ensure the file exists
+if not os.path.exists(file_path):
+    raise ValueError("API Key file does not exist")
+
+# Read the API key from the file
+with open(file_path, "r") as file:
+    openai.api_key = file.read().strip()
+with open("bitly.txt", "r") as file:
+    bitly_key = file.read().strip()
 # Load the API key from a local file
 def get_api_key():
     try:
@@ -16,7 +30,6 @@ def get_api_key():
         return api_key
     except Exception as e:
         logging.error(f'Failed to read API key: {e}')
-
 # Get a list of robots
 def get_robots():
     try:
@@ -129,12 +142,72 @@ def download_screenshots(screen_shot_robot_id):
 
         count += 1  # Increment the counter
 
+def generate_affiliate_link(product_link, affiliate_id):
+    """
+    Generate affiliate link using product link and affiliate id.
 
+    Args:
+        product_link (str): The link of the product.
+        affiliate_id (str): Your affiliate id.
 
+    Returns:
+        str: The affiliate link.
+    """
+    return product_link + "?tag=" + affiliate_id
+def generate_short_link(affiliate_link):
+    """
+    Generate short link using Bitly API.
+
+    Args:
+        affiliate_link (str): The affiliate link.
+
+    Returns:
+        str: The short link.
+    """
+    url = f"https://api-ssl.bitly.com/v4/shorten"
+    headers = {
+        "Authorization": f"Bearer {bitly_key}",  # Replace with your Bitly API key
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "long_url": affiliate_link,
+        "domain": "bit.ly",
+    }
+    response = requests.post(url, headers=headers, json=payload)
+    return response.json()['link']
+
+def print_product_info_in_md(robot_id):
+    """
+    Prints the position, discount rate, product name, affiliate link, and short link in markdown format
+    for the given robot id, and saves the output in markdown and CSV format.
+
+    Args:
+        robot_id (str): The id of the robot for which product info is printed.
+
+    """
+    res = get_robot_tasks(robot_id)
+    markdown_output = "| Position | Discount Rate | Product Name | Affiliate Link | Short Link |\n| --- | --- | --- | --- | --- |\n"
+    csv_output = []
+
+    for item in res['result']['robotTasks']['items'][-1]['capturedLists']['amazon product list parser']:
+        affiliate_link = generate_affiliate_link(item['product link'], 'schentop5amaz-20')
+        short_link = generate_short_link(affiliate_link)
+        markdown_output += f"| {item['Position']} | {item['discount rate']} | {item['product name']} | {affiliate_link} | {short_link} |\n"
+        csv_output.append([item['Position'], item['discount rate'], item['product name'], affiliate_link, short_link])
+
+    print(markdown_output)
+
+    # Write markdown output to .md file
+    md_filename = input("Enter the markdown filename (without extension): ")
+    os.makedirs('./markdown_output', exist_ok=True)  # Create directory if it doesn't exist
+    with open(f'./markdown_output/{md_filename}.md', 'w') as f:
+        f.write(markdown_output)
+
+    # Write CSV output to .csv file
+    csv_filename = input("Enter the CSV filename (without extension): ")
+    os.makedirs('./csv_output', exist_ok=True)  # Create directory if it doesn't exist
+    df = pd.DataFrame(csv_output, columns=['Position', 'Discount Rate', 'Product Name', 'Affiliate Link', 'Short Link'])
+    df.to_csv(f'./csv_output/{csv_filename}.csv', index=False)
+# Usage
 deal_list_robot_id = "fa361dc9-4801-4c6c-8e46-907865508e05"
-screen_shot_robot_id = "da5987ee-0d04-4b70-96f9-6ae0fb5ec391"
-# download_screenshots(screen_shot_robot_id)
-res = get_robot_tasks(deal_list_robot_id)
-# print(res['result']['robotTasks']['items'][-1]['capturedLists']['amazon product list parser'])
-for item in res['result']['robotTasks']['items'][-1]['capturedLists']['amazon product list parser']:
-    print(item['Position'], item['discount rate'], item['product name'])
+print_product_info_in_md(deal_list_robot_id)
