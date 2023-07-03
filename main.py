@@ -1,27 +1,44 @@
+import csv
+import glob
 import http.client
-from fileinput import filename
-
-import requests
 import json
 import logging
 import os
-import pandas as pd
-import openai
-import csv
 import time
+from urllib.parse import urlparse
+
+import openai
+import pandas as pd
+import pyperclip
+import requests
 from tabulate import tabulate
 
-# API keys
-with open("bitly.txt", "r") as file:
-    bitly_key = file.read().strip()
+
+def remove_files():
+    # Get a list of all the files in the current directory
+    md_files = glob.glob('*.md')
+    csv_files = glob.glob('*.csv')
+    result_csv_files = glob.glob('result/*.csv')
+
+    all_files = md_files + csv_files + result_csv_files
+
+    if 'readme.md' in all_files:
+        all_files.remove('readme.md')
+
+    for filename in all_files:
+        os.remove(filename)
+        print(f'Deleted file: {filename}')
+
 
 def get_api_key():
     try:
         with open('key.txt', 'r') as file:
-            api_key = file.read().replace('\n', '')
+            api_key = file.read().strip()
         return api_key
     except Exception as e:
         logging.error(f'Failed to read API key: {e}')
+        return None
+
 
 def get_robots():
     try:
@@ -29,40 +46,44 @@ def get_robots():
         headers = {'Authorization': f"Bearer {get_api_key()}"}
         conn.request("GET", "/v2/robots", headers=headers)
         res = conn.getresponse()
-        data = res.read()
-        pretty_data = json.loads(data.decode("utf-8"))
-        return pretty_data
+        data = res.read().decode("utf-8")
+        return json.loads(data)
     except Exception as e:
         logging.error(f'Failed to get robots: {e}')
+        return None
 
-def get_robot_tasks(robotId):
+
+def get_robot_tasks(robot_id):
     try:
         conn = http.client.HTTPSConnection("api.browse.ai")
         headers = {'Authorization': f"Bearer {get_api_key()}"}
-        conn.request("GET", f"/v2/robots/{robotId}/tasks?page=1", headers=headers)
+        conn.request("GET", f"/v2/robots/{robot_id}/tasks?page=1", headers=headers)
         res = conn.getresponse()
-        data = res.read()
-        pretty_data = json.loads(data.decode("utf-8"))
-        return pretty_data
+        data = res.read().decode("utf-8")
+        return json.loads(data)
     except Exception as e:
         logging.error(f'Failed to get robot tasks: {e}')
+        return None
 
-def post_robot_task(robotId, originUrl):
+
+def post_robot_task(robot_id, origin_url):
     try:
-        url = f"https://api.browse.ai/v2/robots/{robotId}/tasks"
-        payload = {"inputParameters": {"originUrl": originUrl}}
+        url = f"https://api.browse.ai/v2/robots/{robot_id}/tasks"
+        payload = {"inputParameters": {"originUrl": origin_url}}
         headers = {"Authorization": f"Bearer {get_api_key()}"}
         response = requests.request("POST", url, json=payload, headers=headers)
-        pretty_data = json.loads(response.text)
-        return pretty_data
+        return response.json()
     except Exception as e:
         logging.error(f'Failed to post robot task: {e}')
+        return None
+
 
 def generate_affiliate_link(product_link, affiliate_id):
-    return product_link + "?tag=" + affiliate_id
+    return f"{product_link}?tag={affiliate_id}"
 
-def generate_short_link(affiliate_link):
-    url = f"https://api-ssl.bitly.com/v4/shorten"
+
+def generate_short_link(affiliate_link, bitly_key):
+    url = "https://api-ssl.bitly.com/v4/shorten"
     headers = {
         "Authorization": f"Bearer {bitly_key}",
         "Content-Type": "application/json"
@@ -74,19 +95,20 @@ def generate_short_link(affiliate_link):
     response = requests.post(url, headers=headers, json=payload)
     return response.json()['link']
 
-def print_product_info_in_md(robot_id):
+
+def print_product_info_in_md(robot_id, bitly_key):
     res = get_robot_tasks(robot_id)
+
     markdown_output = "| Position | Discount Rate | Product Name | Short Link |\n| --- | --- | --- | --- |\n"
     csv_output = []
 
-    for task in res["result"]['robotTasks']['items']:
+    for task in res.get('result', {}).get('robotTasks', {}).get('items', []):
         if 'capturedLists' in task and 'amazon product list parser' in task['capturedLists']:
             count = 1
             for item in task['capturedLists']['amazon product list parser']:
                 affiliate_link = generate_affiliate_link(item['product link'], 'schentop5amaz-20')
-                short_link = generate_short_link(affiliate_link)
+                short_link = generate_short_link(affiliate_link, bitly_key)
                 discount_rate = item['discount rate']
-                # Generate and save the description
                 generate_description(count, discount_rate, item['product name'], short_link)
                 count += 1
                 markdown_output += f"| {item['Position']} | {item['discount rate']} | {item['product name']} | {short_link} |\n"
@@ -94,15 +116,18 @@ def print_product_info_in_md(robot_id):
 
     timestamp = time.strftime("%Y%m%d-%H%M")
     markdown_filename = f"deal-{timestamp}"
+
     with open(f"{markdown_filename}.md", "w") as f:
         f.write(markdown_output)
 
     os.makedirs('./csv_output', exist_ok=True)
+
     with open(f'./csv_output/{markdown_filename}.csv', 'w', newline='') as file:
         writer = csv.writer(file)
         writer.writerows(csv_output)
 
-    return markdown_filename  # Return the filename without extension
+    return markdown_filename
+
 def generate_description(position, discount_rate,product_name, short_link):
     # Generate description
     description = f"{position} {discount_rate} {product_name}, Link: {short_link}"
@@ -167,29 +192,86 @@ def generate_script_with_gpt(markdown_output):
     return script_filename  # Return the filename without extension
 
 
+
 def iterate_last_column(filename):
     with open(filename, 'r') as f:
         lines = f.readlines()
 
-        # Remove undesired phrases from the lines
-        lines = [line.replace("Description", "").replace("---", "") for line in lines]
+    output_text = ""
+    # Remove undesired phrases from the lines
+    lines = [line.replace("Description", "").replace("---", "") for line in lines]
 
-        for line in lines:
-            columns = line.split("|")
-            if len(columns) > 1:  # Exclude lines that don't have the pipe character
-                last_column = columns[-2]  # The last column is the second last element after split due to trailing "|"
-                print(last_column.strip())  # strip is used to remove leading and trailing whitespace
+    for line in lines:
+        columns = line.split("|")
+        if len(columns) > 1:  # Exclude lines that don't have the pipe character
+            last_column = columns[-2]  # The last column is the second last element after split due to trailing "|"
+            output_text += last_column.strip() + "\n"  # strip is used to remove leading and trailing whitespace
+            print(last_column.strip())
 
+    # Copy the output_text to clipboard
+    pyperclip.copy(output_text)
 
 # Usage
 deal_list_robot_id = "fa361dc9-4801-4c6c-8e46-907865508e05"
-markdown_filename = print_product_info_in_md(deal_list_robot_id)
+screenshots_id = "da5987ee-0d04-4b70-96f9-6ae0fb5ec391"
+task_id = "c70a17a7-9608-44ae-9207-a62b85ef11c5"
 
-# Open the markdown file and read its content
-with open(f"{markdown_filename}.md", "r") as f:
-    markdown_output = f.read()
+def download_png_files(png_files):
+    if not os.path.exists('screenshots'):
+        os.makedirs('screenshots')
+    count = 1
+    for url in png_files:
 
-# Use the markdown_output
-script_filename = generate_script_with_gpt(markdown_output)
+        response = requests.get(url, stream=True)
 
-iterate_last_column(f"result/{script_filename}.md")
+        a = urlparse(url)
+        filename = os.path.basename(a.path)
+
+        if response.status_code == 200:
+            with open('screenshots/'+f"{count} --- {filename}", 'wb') as f:
+                f.write(response.content)
+        count += 1
+
+def get_single_task_result(robot_id, task_id, api_key):
+    conn = http.client.HTTPSConnection("api.browse.ai")
+
+    headers = {'Authorization': f"Bearer {api_key}"}
+
+    conn.request("GET", f"/v2/robots/{robot_id}/tasks/{task_id}", headers=headers)
+
+    res = conn.getresponse()
+    data = res.read().decode("utf-8")
+
+    return json.loads(data)
+def get_png_files(task_result):
+    captured_screenshots = task_result.get('result', {}).get('capturedScreenshots', {})
+    png_files = []
+    for screenshot in captured_screenshots.values():
+        png_files.append(screenshot.get('src', ''))
+    return png_files
+def main():
+    # Ask the user for their choice
+    choice = input("Enter '1' to get screenshots of task, '2' to generate script, or '3' to do both: ")
+
+    if choice == '1' or choice == '3':
+        screenshots_list = get_png_files(get_single_task_result(screenshots_id, task_id, get_api_key()))
+        download_png_files(screenshots_list)
+
+    if choice == '2' or choice == '3':
+        markdown_filename = print_product_info_in_md(deal_list_robot_id)
+
+        # Open the markdown file and read its content
+        with open(f"{markdown_filename}.md", "r") as f:
+            markdown_output = f.read()
+
+        # Use the markdown_output
+        script_filename = generate_script_with_gpt(markdown_output)
+
+        iterate_last_column(f"result/{script_filename}.md")
+
+        # Call the function to remove files
+        remove_files()
+
+
+if __name__ == "__main__":
+    main()
