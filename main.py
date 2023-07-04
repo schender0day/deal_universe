@@ -9,10 +9,12 @@ import urllib
 from urllib.parse import urlparse
 import imgkit
 import openai
+import string
 import pandas as pd
 import pyperclip
 import requests
 from tabulate import tabulate
+from test import extract_promotion_code_in_html, translate_text_with_chatgpt, convert_html_to_jpeg
 
 
 def remove_files():
@@ -87,7 +89,9 @@ def post_robot_task(robot_id, origin_url):
 
 
 def generate_affiliate_link(product_link, affiliate_id):
-    return f"{product_link}?tag={affiliate_id}"
+    link = f"{product_link}/ref=nosim?tag={affiliate_id}"
+    print(link)
+    return link
 
 
 def generate_short_link(affiliate_link, bitly_key):
@@ -119,32 +123,38 @@ def clean_url(encoded_url):
 
     # Clean the Amazon URL to remove tracking information
     clean_url = amazon_url.split('?')[0]
-
+    print(clean_url)
     return clean_url
 
 def print_product_info_in_md(robot_id, bitly_key):
     res = get_robot_tasks(robot_id)
-    print(res.get('result', {}).get('robotTasks', {}).get('items', []))
+    print(res)
+    if not os.path.exists('product_image'):
+        os.makedirs('product_image')
     markdown_output = "| Position | Product Link | Image | Price | Product Name | Promotion | Short Link |\n| --- | --- | --- | --- | --- | --- | --- |\n"
     csv_output = []
     item_count = 0
+    idx =  0
     for task in res.get('result', {}).get('robotTasks', {}).get('items', []):
-        if 'capturedLists' in task and 'dealmoon promotion' in task['capturedLists']:
-            for item in task['capturedLists']['dealmoon promotion']:
+        if 'capturedLists' in task and 'dealmoon ult2' in task['capturedLists']:
+            for item in task['capturedLists']['dealmoon ult2']:
+                print(item)
                 if item_count == 10:
                     break
                 # Clean the product link to get the original Amazon URL
                 amazon_url = clean_url(item['product link'])
-
+                output_file = f'product_image/product_{idx + 1}.jpeg'
+                convert_html_to_jpeg(item["product image"], output_file)
                 affiliate_link = generate_affiliate_link(amazon_url, 'schentop5amaz-20')
                 short_link = generate_short_link(affiliate_link, get_bitly_api_key())
                 price = item['price']
                 generate_description(item_count + 1, price, item['product name'], short_link)
-                markdown_output += f"| {item['Position']} | {amazon_url} | {item['image']} | {item['price']} | {item['product name']} | {item['promotion']} | {short_link} |\n"
+                markdown_output += f"| {item['Position']} | {amazon_url} | {item['image']} | {item['price']} | {item['product name']} | {item.get('promotion', '')} | {short_link} |\n"
                 csv_output.append([item['Position'], amazon_url, item['image'], item['price'], item['product name'],
-                                   item['promotion'], short_link])
+                                   item.get('promotion', ''), short_link])
                 item_count += 1
-            if item_count == 20:
+                idx += 1
+            if item_count == 10:  # I changed this to 10 because you're checking for 10 items before
                 break
     timestamp = time.strftime("%Y%m%d-%H%M")
     markdown_filename = f"deal-{timestamp}"
@@ -160,18 +170,26 @@ def print_product_info_in_md(robot_id, bitly_key):
 
     return markdown_filename
 
-def generate_description(position, discount_rate,product_name, short_link):
+
+def sanitize_filename(filename):
+    valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
+    return ''.join(c for c in filename if c in valid_chars)
+
+def generate_description(position, discount_rate, product_name, short_link):
     # Generate description
     description = f"{position} {discount_rate} {product_name}, Link: {short_link}"
 
     # Generate timestamp
     timestamp = time.strftime("%Y%m%d-%H%M")
 
+    # Sanitize product name for filename
+    sanitized_product_name = sanitize_filename(product_name)
+
     # Create a directory for descriptions if it does not exist
     os.makedirs('./product_description', exist_ok=True)
 
     # Save the description in a text file named with product-timestamp
-    with open(f'./product_description/{product_name}-{timestamp}.txt', 'w') as file:
+    with open(f'./product_description/{sanitized_product_name}-{timestamp}.txt', 'w') as file:
         file.write(description)
 
     # Print the description
@@ -244,9 +262,9 @@ def iterate_last_column(filename):
     pyperclip.copy(output_text)
 
 # Usage
-deal_list_robot_id = "d572631e-0d22-4d0c-9390-79ac23f82c35"
+deal_list_robot_id = "44fbfcdb-d3d1-4c1a-9f7e-55a2116ec84c"
 screenshots_id = "da5987ee-0d04-4b70-96f9-6ae0fb5ec391"
-task_id = "913fdbaf-09ce-484d-98be-d67adb4c588a"
+task_id = "319e264e-d265-4712-864e-27733c1a7aca"
 
 def download_png_files(png_files):
     if not os.path.exists('screenshots'):

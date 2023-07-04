@@ -2,6 +2,7 @@ import re
 import imgkit
 from PIL import Image
 import openai
+
 def extract_promotion_code_in_html(html_string):
     # Regular expression to find the promotion block
     promotion_re = re.compile(r'<p class="dm-sp-card-desc">[^<]*</p>')
@@ -19,14 +20,21 @@ def translate_text_with_chatgpt(text):
     with open("chat.txt", "r") as file:
         openai.api_key = file.read().strip()
 
-    response = openai.Completion.create(
-        model="text-davinci-002",
-        prompt=f"{text}\n\nTranslate the above text to English in less than 10 words, only product name , not brand name, no location:",
-        temperature=0.3,
-        max_tokens=200
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a helpful assistant. Translate the given text to English, making sure to only keep the product name and important details, Example will be: Amazon Ringbell, Iphone 12 ProMax, do not inlcude anything like 'translation' or chinese characters, chinese romaji in output, no more than 10 words in output"
+            },
+            {
+                "role": "user",
+                "content": text
+            }
+        ]
     )
 
-    translated_text = response.choices[0].text.strip()
+    translated_text = response['choices'][0]['message']['content'].strip()
 
     # If the translated text has more than 7 words, split it into multiple lines
     words = translated_text.split()
@@ -37,19 +45,14 @@ def translate_text_with_chatgpt(text):
 
     return translated_text
 
-def translate_chinese_in_html(html_string):
+def remove_chinese_in_html(html_string):
     # Regular expression to find Chinese characters
     chinese_re = re.compile(r"[\u4e00-\u9fa5]+")
 
-    # Find all Chinese texts in the HTML string
-    chinese_texts = chinese_re.findall(html_string)
+    # Replace all Chinese characters in the HTML string with an empty string
+    no_chinese_string = chinese_re.sub('', html_string)
 
-    # Translate each Chinese text and replace it in the HTML string
-    for text in chinese_texts:
-        translated_text = translate_text_with_chatgpt(text)
-        html_string = html_string.replace(text, translated_text)
-
-    return html_string
+    return no_chinese_string
 
 def convert_html_to_jpeg(html_string, output_file):
     temp_file = "temp.jpeg"
@@ -61,8 +64,8 @@ def convert_html_to_jpeg(html_string, output_file):
     # Extract promotion code in the HTML string
     html_string = extract_promotion_code_in_html(html_string)
 
-    # Translate Chinese in the HTML string to English
-    html_string = translate_chinese_in_html(html_string)
+    # Remove Chinese characters in the HTML string
+    html_string = remove_chinese_in_html(html_string)
 
     html_string = f'''
     <style>
@@ -97,15 +100,8 @@ def convert_html_to_jpeg(html_string, output_file):
 
     imgkit.from_string(html_string, temp_file, options=options)
     img = Image.open(temp_file)
-    # img = img.resize((500, 500), Image.LANCZOS)
 
     width, height = img.size
     img = img.crop((0, 0, height, height))
 
     img.save(output_file)
-
-    # optionally delete the temporary file
-    # import os
-    # os.remove(temp_file)
-
-convert_html_to_jpeg('<!-- 排行信息 --> <i class="dm-sp-card-rank" data-rank="10">10</i> <!-- 主图 --> <a class="dm-sp-card-img" target="_blank" trkrip="home-hotSps" href="https://www.dealmoon.com/product/-arctic-ocean-mandarin-soda-drink-beibingyang-orange-sparkling-juice-chinese-traditional-soda-beverage-11-1-fl-oz-330ml-per-can-24-cans/5751949"> <img src="https://imgcache.dealmoon.com/thumbimg.dealmoon.com/dealmoon/c9e/f1a/8af/26af3c1199f7e69fffef085.jpg_480_480_2_83c2.jpg" alt="北冰洋罐装橙汁汽水 11.1oz 24罐"> </a> <!-- 基本信息 --> <a trkrip="home-hotSps" class="dm-sp-card-title-link" target="_blank" href="https://www.dealmoon.com/product/-arctic-ocean-mandarin-soda-drink-beibingyang-orange-sparkling-juice-chinese-traditional-soda-beverage-11-1-fl-oz-330ml-per-can-24-cans/5751949"> <p class="dm-sp-card-price"> <span class="sale">$28.65</span><del class="origin">$41.99</del> </p> <p class="dm-sp-card-title"> 北冰洋罐装橙汁汽水 11.1oz 24罐 </p> <p class="dm-sp-card-desc"> 需购买3件 码: DM1004PD </p> </a>', 'test.jpeg')
