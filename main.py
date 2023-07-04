@@ -5,8 +5,9 @@ import json
 import logging
 import os
 import time
+import urllib
 from urllib.parse import urlparse
-
+import imgkit
 import openai
 import pandas as pd
 import pyperclip
@@ -38,7 +39,14 @@ def get_api_key():
     except Exception as e:
         logging.error(f'Failed to read API key: {e}')
         return None
-
+def get_bitly_api_key():
+    try:
+        with open('bitly.txt', 'r') as file:
+            api_key = file.read().strip()
+        return api_key
+    except Exception as e:
+        logging.error(f'Failed to read API key: {e}')
+        return None
 
 def get_robots():
     try:
@@ -93,27 +101,51 @@ def generate_short_link(affiliate_link, bitly_key):
         "domain": "bit.ly",
     }
     response = requests.post(url, headers=headers, json=payload)
+
+    # Check if the request was successful
+    if response.status_code != 200:
+        logging.error("Bitly API request failed. Error: %s", response.text)
+        return None
+
     return response.json()['link']
 
 
+def clean_url(encoded_url):
+    # Decode URL
+    decoded_url = urllib.parse.unquote(encoded_url)
+
+    # Extract amazon link from decoded URL
+    amazon_url = urllib.parse.urlparse(decoded_url).query.split('url=')[1].split('&')[0]
+
+    # Clean the Amazon URL to remove tracking information
+    clean_url = amazon_url.split('?')[0]
+
+    return clean_url
+
 def print_product_info_in_md(robot_id, bitly_key):
     res = get_robot_tasks(robot_id)
-
-    markdown_output = "| Position | Discount Rate | Product Name | Short Link |\n| --- | --- | --- | --- |\n"
+    print(res.get('result', {}).get('robotTasks', {}).get('items', []))
+    markdown_output = "| Position | Product Link | Image | Price | Product Name | Promotion | Short Link |\n| --- | --- | --- | --- | --- | --- | --- |\n"
     csv_output = []
-
+    item_count = 0
     for task in res.get('result', {}).get('robotTasks', {}).get('items', []):
-        if 'capturedLists' in task and 'amazon product list parser' in task['capturedLists']:
-            count = 1
-            for item in task['capturedLists']['amazon product list parser']:
-                affiliate_link = generate_affiliate_link(item['product link'], 'schentop5amaz-20')
-                short_link = generate_short_link(affiliate_link, bitly_key)
-                discount_rate = item['discount rate']
-                generate_description(count, discount_rate, item['product name'], short_link)
-                count += 1
-                markdown_output += f"| {item['Position']} | {item['discount rate']} | {item['product name']} | {short_link} |\n"
-                csv_output.append([item['Position'], item['discount rate'], item['product name'], short_link])
+        if 'capturedLists' in task and 'dealmoon promotion' in task['capturedLists']:
+            for item in task['capturedLists']['dealmoon promotion']:
+                if item_count == 10:
+                    break
+                # Clean the product link to get the original Amazon URL
+                amazon_url = clean_url(item['product link'])
 
+                affiliate_link = generate_affiliate_link(amazon_url, 'schentop5amaz-20')
+                short_link = generate_short_link(affiliate_link, get_bitly_api_key())
+                price = item['price']
+                generate_description(item_count + 1, price, item['product name'], short_link)
+                markdown_output += f"| {item['Position']} | {amazon_url} | {item['image']} | {item['price']} | {item['product name']} | {item['promotion']} | {short_link} |\n"
+                csv_output.append([item['Position'], amazon_url, item['image'], item['price'], item['product name'],
+                                   item['promotion'], short_link])
+                item_count += 1
+            if item_count == 20:
+                break
     timestamp = time.strftime("%Y%m%d-%H%M")
     markdown_filename = f"deal-{timestamp}"
 
@@ -212,9 +244,9 @@ def iterate_last_column(filename):
     pyperclip.copy(output_text)
 
 # Usage
-deal_list_robot_id = "fa361dc9-4801-4c6c-8e46-907865508e05"
+deal_list_robot_id = "d572631e-0d22-4d0c-9390-79ac23f82c35"
 screenshots_id = "da5987ee-0d04-4b70-96f9-6ae0fb5ec391"
-task_id = "c70a17a7-9608-44ae-9207-a62b85ef11c5"
+task_id = "913fdbaf-09ce-484d-98be-d67adb4c588a"
 
 def download_png_files(png_files):
     if not os.path.exists('screenshots'):
@@ -258,7 +290,7 @@ def main():
         download_png_files(screenshots_list)
 
     if choice == '2' or choice == '3':
-        markdown_filename = print_product_info_in_md(deal_list_robot_id)
+        markdown_filename = print_product_info_in_md(deal_list_robot_id, get_api_key())
 
         # Open the markdown file and read its content
         with open(f"{markdown_filename}.md", "r") as f:
