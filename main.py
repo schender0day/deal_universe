@@ -14,7 +14,7 @@ import pandas as pd
 import pyperclip
 import requests
 from tabulate import tabulate
-from test import extract_promotion_code_in_html, translate_text_with_chatgpt, convert_html_to_jpeg
+from test import extract_promotion_code_in_html, convert_html_to_jpeg
 
 
 def remove_files():
@@ -30,7 +30,7 @@ def remove_files():
 
     for filename in all_files:
         os.remove(filename)
-        print(f'Deleted file: {filename}')
+        # print(f'Deleted file: {filename}')
 
 
 def get_api_key():
@@ -90,7 +90,7 @@ def post_robot_task(robot_id, origin_url):
 
 def generate_affiliate_link(product_link, affiliate_id):
     link = f"{product_link}/ref=nosim?tag={affiliate_id}"
-    print(link)
+    # print(link)
     return link
 
 
@@ -123,35 +123,37 @@ def clean_url(encoded_url):
 
     # Clean the Amazon URL to remove tracking information
     clean_url = amazon_url.split('?')[0]
-    print(clean_url)
+    # print(clean_url)
     return clean_url
 
 def print_product_info_in_md(robot_id, bitly_key):
     res = get_robot_tasks(robot_id)
-    print(res)
+    print(json.dumps(res, indent=4))
     if not os.path.exists('product_image'):
         os.makedirs('product_image')
     markdown_output = "| Position | Product Link | Image | Price | Product Name | Promotion | Short Link |\n| --- | --- | --- | --- | --- | --- | --- |\n"
     csv_output = []
     item_count = 0
     idx =  0
-    for task in res.get('result', {}).get('robotTasks', {}).get('items', []):
+    for task in res.get('result', {}).get('robotTasks', {}).get('items', [])[-1:]:
+
         if 'capturedLists' in task and 'dealmoon ult2' in task['capturedLists']:
             for item in task['capturedLists']['dealmoon ult2']:
-                print(item)
-                if item_count == 10:
+                # print(item)
+                if item_count == 100:
                     break
                 # Clean the product link to get the original Amazon URL
                 amazon_url = clean_url(item['product link'])
                 output_file = f'product_image/product_{idx + 1}.jpeg'
                 convert_html_to_jpeg(item["product image"], output_file)
+                promotion = f"Promotion Code:{item['promotion']}"
                 affiliate_link = generate_affiliate_link(amazon_url, 'schentop5amaz-20')
-                short_link = generate_short_link(affiliate_link, get_bitly_api_key())
+                short_link = None
                 price = item['price']
-                generate_description(item_count + 1, price, item['product name'], short_link)
-                markdown_output += f"| {item['Position']} | {amazon_url} | {item['image']} | {item['price']} | {item['product name']} | {item.get('promotion', '')} | {short_link} |\n"
+                generate_description(item_count + 1, price, item['product name'], affiliate_link, promotion)
+                markdown_output += f"| {item['Position']} | {amazon_url} | {item['image']} | {item['price']} | {item['product name']} | {item.get('promotion', '')} | {short_link if short_link else affiliate_link} |\n"
                 csv_output.append([item['Position'], amazon_url, item['image'], item['price'], item['product name'],
-                                   item.get('promotion', ''), short_link])
+                                   item.get('promotion', ''), affiliate_link])
                 item_count += 1
                 idx += 1
             if item_count == 10:  # I changed this to 10 because you're checking for 10 items before
@@ -174,10 +176,17 @@ def print_product_info_in_md(robot_id, bitly_key):
 def sanitize_filename(filename):
     valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
     return ''.join(c for c in filename if c in valid_chars)
+import re
 
-def generate_description(position, discount_rate, product_name, short_link):
+def generate_description(position, discount_rate, product_name, short_link, promotion="no promotion code"):
+    # Extract the sale price and the original price from discount_rate using regular expressions
+    sale_price_match = re.search(r'<span class="sale">(.+?)</span>', discount_rate)
+    sale_price = sale_price_match.group(1) if sale_price_match else None
+    original_price_match = re.search(r'<del class="origin">(.+?)</del>', discount_rate)
+    original_price = original_price_match.group(1) if original_price_match else None
+
     # Generate description
-    description = f"{position} {discount_rate} {product_name}, Link: {short_link}"
+    description = f"{position} {product_name}, Sale Price: {sale_price}, Original Price: {original_price}, {promotion},Link: {short_link}"
 
     # Generate timestamp
     timestamp = time.strftime("%Y%m%d-%H%M")
@@ -194,6 +203,7 @@ def generate_description(position, discount_rate, product_name, short_link):
 
     # Print the description
     print(description)
+
 def add_space_around_pipe(filename):
     with open(filename, "r") as f:
         content = f.read()
@@ -258,13 +268,14 @@ def iterate_last_column(filename):
             output_text += last_column.strip() + "\n"  # strip is used to remove leading and trailing whitespace
             print(last_column.strip())
 
+
     # Copy the output_text to clipboard
     pyperclip.copy(output_text)
 
 # Usage
 deal_list_robot_id = "44fbfcdb-d3d1-4c1a-9f7e-55a2116ec84c"
 screenshots_id = "da5987ee-0d04-4b70-96f9-6ae0fb5ec391"
-task_id = "319e264e-d265-4712-864e-27733c1a7aca"
+task_id = "d774104e-e569-4f4a-8d51-4edc1bf50398"
 
 def download_png_files(png_files):
     if not os.path.exists('screenshots'):
@@ -299,6 +310,13 @@ def get_png_files(task_result):
     for screenshot in captured_screenshots.values():
         png_files.append(screenshot.get('src', ''))
     return png_files
+# def print_last_column(filename):
+#     df = pd.read_csv(f'./result/{filename}', sep="|", skiprows=1, quotechar='"', error_bad_lines=False)
+#     df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x) # Remove unnecessary spaces
+#     last_column = df.columns[-1] # Get the last column name
+#     # print(df[last_column].dropna()) # Print the last column, dropping NaN values
+
+
 def main():
     # Ask the user for their choice
     choice = input("Enter '1' to get screenshots of task, '2' to generate script, or '3' to do both: ")
@@ -315,10 +333,10 @@ def main():
             markdown_output = f.read()
 
         # Use the markdown_output
-        script_filename = generate_script_with_gpt(markdown_output)
+        # script_filename = generate_script_with_gpt(markdown_output)
 
-        iterate_last_column(f"result/{script_filename}.md")
-
+        # iterate_last_column(f"result/{script_filename}.md")
+        # print_last_column(f"{script_filename}.md")
         # Call the function to remove files
         remove_files()
 
