@@ -174,6 +174,10 @@ def convert_html_to_jpeg(html_string, output_file):
             text-decoration: none;
             pointer-events: none;
             font-size: 33px;
+            
+        }}
+        .dm-sp-card-title {{
+            display: none;
         }}
         .dm-sp-card-desc {{
             display:none;       

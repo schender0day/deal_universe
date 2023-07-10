@@ -10,7 +10,7 @@ csv_output/*
 sct_output/*
 # C extensions
 *.so
-
+key.json
 # Distribution / packaging
 .Python
 build/

@@ -13,6 +13,7 @@ import string
 import pandas as pd
 import pyperclip
 import requests
+from bs4 import BeautifulSoup
 from tabulate import tabulate
 from test import extract_promotion_code_in_html, convert_html_to_jpeg
 
@@ -125,6 +126,52 @@ def clean_url(encoded_url):
     clean_url = amazon_url.split('?')[0]
     # print(clean_url)
     return clean_url
+def temu_url_parser(html_content):
+    soup = BeautifulSoup(html_content, 'html.parser')
+    product_link_tag = soup.find('a', {'class': '_3VEjS46S _2IVkRQY-'})
+    relative_url = product_link_tag['href'] if product_link_tag else 'No product link found'
+    base_url = "https://www.temu.com"
+    full_url = base_url + relative_url if relative_url.startswith("/") else relative_url
+    return full_url
+
+def download_product_image(image_url, product_number):
+    # Create the directory if it doesn't exist
+    if not os.path.exists('./product_image'):
+        os.makedirs('./product_image')
+
+    # Download the image
+    response = requests.get(image_url, stream=True)
+    response.raise_for_status()
+
+    # Save the image to the file
+    filename = f'./product_image/product_{product_number}.jpeg'
+    with open(filename, 'wb') as file:
+        for chunk in response.iter_content(chunk_size=8192):
+            file.write(chunk)
+
+
+def parse_prices(html_content):
+    soup = BeautifulSoup(html_content, 'html.parser')
+
+    # Extracting the current price
+    current_price_div = soup.find('div', {'class': '_2Ci4uR69', 'aria-hidden': 'true'})
+    current_price = float(current_price_div.text) if current_price_div else None
+
+    # Extracting the market price
+    market_price_span = soup.find('span', {'data-type': 'marketPrice'})
+    market_price = float(market_price_span.text[1:]) if market_price_span else None
+
+    return current_price, market_price
+def parse_prices_from_markdown(filename):
+    with open(filename, 'r') as f:
+        lines = f.readlines()
+
+    for line in lines[2:]:  # Skip the header and separator lines
+        columns = line.split("|")
+        if len(columns) > 6:  # There should be at least 7 columns (1-indexed Position to 7-indexed Short Link)
+            price_html = columns[4]  # The Price column is the 5th column (4-indexed)
+            current_price, market_price = parse_prices(price_html)
+            print(f"Current price: {current_price}, Market price: {market_price}")
 
 def print_product_info_in_md(robot_id, bitly_key):
     res = get_robot_tasks(robot_id)
@@ -135,12 +182,12 @@ def print_product_info_in_md(robot_id, bitly_key):
     csv_output = []
     item_count = 0
     idx =  0
-    for task in res.get('result', {}).get('robotTasks', {}).get('items', [])[-1:]:
+    for task in res.get('result', {}).get('robotTasks', {}).get('items', [])[-2:]:
 
         if 'capturedLists' in task and 'dealmoon ult2' in task['capturedLists']:
             for item in task['capturedLists']['dealmoon ult2']:
                 # print(item)
-                if item_count == 100:
+                if item_count == 20:
                     break
                 # Clean the product link to get the original Amazon URL
                 amazon_url = clean_url(item['product link'])
@@ -151,13 +198,34 @@ def print_product_info_in_md(robot_id, bitly_key):
                 short_link = None
                 price = item['price']
                 generate_description(item_count + 1, price, item['product name'], affiliate_link, promotion)
-                markdown_output += f"| {item['Position']} | {amazon_url} | {item['image']} | {item['price']} | {item['product name']} | {item.get('promotion', '')} | {short_link if short_link else affiliate_link} |\n"
+                item_price = parse_prices_from_markdown(item['price'])
+                markdown_output += f"| {item['Position']} | {amazon_url} | {item['image']} | {item_price} | {item['product name']} | {item.get('promotion', '')} | {short_link if short_link else affiliate_link} |\n"
                 csv_output.append([item['Position'], amazon_url, item['image'], item['price'], item['product name'],
                                    item.get('promotion', ''), affiliate_link])
                 item_count += 1
                 idx += 1
             if item_count == 10:  # I changed this to 10 because you're checking for 10 items before
                 break
+        else:
+            for item in task['capturedLists']['temu']:
+                print("TEMUTEMUTEMUTEMUTEMU")
+                if item_count == 15:
+                    break
+                # Clean the product link to get the original Amazon URL
+                temu_url = temu_url_parser(item["product image"])
+                output_file = f'product_image/product_{idx + 1}.jpeg'
+                image = download_product_image(item["image"], idx + 1)
+                promotion = f"Promotion Code: afq97285"
+                affiliate_link = temu_url
+                short_link = temu_url
+                price = item['price']
+                generate_description(item_count + 1, price, item['product name'], affiliate_link, promotion)
+                markdown_output += f"| {item['Position']} | {item['price']} | {item['product name']} | {temu_url}  |\n"
+                csv_output.append([item['Position'], temu_url, item['image'], item['price'], item['product name'],
+                                   item.get('promotion', ''), affiliate_link])
+                item_count += 1
+                idx += 1
+                print(markdown_output)
     timestamp = time.strftime("%Y%m%d-%H%M")
     markdown_filename = f"deal-{timestamp}"
 
@@ -179,6 +247,7 @@ def sanitize_filename(filename):
 import re
 
 def generate_description(position, discount_rate, product_name, short_link, promotion="no promotion code"):
+    print("genearating description")
     # Extract the sale price and the original price from discount_rate using regular expressions
     sale_price_match = re.search(r'<span class="sale">(.+?)</span>', discount_rate)
     sale_price = sale_price_match.group(1) if sale_price_match else None
@@ -202,7 +271,7 @@ def generate_description(position, discount_rate, product_name, short_link, prom
         file.write(description)
 
     # Print the description
-    print(description)
+    # print(description)
 
 def add_space_around_pipe(filename):
     with open(filename, "r") as f:
@@ -273,7 +342,11 @@ def iterate_last_column(filename):
     pyperclip.copy(output_text)
 
 # Usage
-deal_list_robot_id = "44fbfcdb-d3d1-4c1a-9f7e-55a2116ec84c"
+input_option = input("What would you like to do?\n1. Amazon\n2.Temu")
+if input_option == "1":
+    deal_list_robot_id = "44fbfcdb-d3d1-4c1a-9f7e-55a2116ec84c"
+elif input_option == "2":
+    deal_list_robot_id = "4fc8cf41-ab7e-4d59-8435-c5318485c26f"
 screenshots_id = "da5987ee-0d04-4b70-96f9-6ae0fb5ec391"
 task_id = "d774104e-e569-4f4a-8d51-4edc1bf50398"
 
